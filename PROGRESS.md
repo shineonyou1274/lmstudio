@@ -42,7 +42,7 @@
 | GPU | Intel Iris Xe (내장 그래픽, RAM을 나눠 씀). NVIDIA 없음 (`nvidia-smi` 없음) |
 | C: 여유 공간 | 79.5 GB |
 | Python | 3.12.10 설치됨 |
-| LM Studio 흔적 (`~\.lmstudio`) | 결과가 붙여지지 않음 — 다시 확인 필요 |
+| LM Studio 흔적 (`~\.lmstudio`) | `False` — 설치·실행한 적 없는 것으로 보임 |
 | 사용자 폴더 | `C:\Users\경남교육청` (한글 경로) |
 
 ### 사양으로 본 판단 (아직 실측 전 — 추측과 구분)
