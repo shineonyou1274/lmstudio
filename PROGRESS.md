@@ -101,6 +101,9 @@
 - 시도 1: `--disable-gpu` → **실패**. 같은 GPU 처리 종료(`exit_code=-2147483645`, 0x80000003)가 반복되고 같은 FATAL로 종료.
   소프트웨어 그리기로 바꿔도 GPU 처리 자체가 죽으므로, 드라이버보다 **샌드박스(격리 실행)와 보안 프로그램의 충돌**일 가능성이 커졌다(미확정).
 - 다음 시도 순서: `--disable-gpu-sandbox` → `--in-process-gpu` → (진단용으로만) `--no-sandbox`.
+- 시도 2: `--disable-gpu-sandbox` → **성공**. LM Studio 첫 설정 화면(Advanced settings)이 열림.
+  → 원인은 GPU 처리의 샌드박스(격리 실행)와 이 PC 환경의 충돌로 좁혀짐. 앞으로 이 옵션을 붙여 실행한다(바로가기 만들 예정).
+- 첫 설정 권장값: Developer Mode 켬(로컬 서버 메뉴 사용), "Start local LLM service on login" 끔(메모리 16GB 절약, 필요할 때만 서버 실행).
 - 대안(Plan B): 화면 없이 LM Studio 명령줄 도구 `lms`로 모델 받기·서버 실행. 우리 앱은 로컬 서버만 있으면 된다.
 
 ### 사양 확인 명령 (읽기 전용)
