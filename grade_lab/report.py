@@ -46,6 +46,8 @@ def build(data_dir: Path) -> Path:
     )
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(html, encoding="utf-8")
+    import student_sheet
+    student_sheet.build(data_dir)
     return OUT
 
 
@@ -131,6 +133,7 @@ select{font:inherit;padding:8px 12px;border-radius:10px;border:1px solid var(--l
 .status{display:inline-block;font-size:11px;padding:1px 7px;border-radius:99px;font-weight:700}
 .status.assume{background:var(--warn-bg);color:var(--warn-ink)}
 .status.ok{background:var(--tag);color:var(--tag-ink)}
+.status.guide{background:var(--s1);color:#fff}
 .big{font-family:"Noto Serif KR","Batang","AppleMyungjo",serif;font-size:30px;font-weight:800;color:var(--ink);line-height:1.2}
 .stack{display:flex;height:30px;border-radius:8px;overflow:hidden;margin:10px 0 6px}
 .stack div{display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;min-width:0;overflow:hidden}
@@ -177,7 +180,8 @@ footer{margin-top:48px;color:var(--muted);font-size:12px;border-top:1px solid va
 
 <h2><span class="no">05</span>학생별 보기</h2>
 <p class="sub">같은 항목끼리만 잇습니다. 내신과 모의고사는 섞지 않습니다.</p>
-<div class="picker"><label for="who"><b>학생 선택</b></label><select id="who"></select></div>
+<div class="picker"><label for="who"><b>학생 선택</b></label><select id="who"></select>
+  <a id="sheetLink" href="#" target="_blank">학생용 한 장 열기 →</a></div>
 <div class="grid" id="student"></div>
 
 <h2><span class="no">06</span>기말 시뮬레이션</h2>
@@ -189,7 +193,7 @@ footer{margin-top:48px;color:var(--muted);font-size:12px;border-top:1px solid va
 <div class="notice" id="simNote"></div>
 
 <h2><span class="no">07</span>적용한 규칙과 계산 방법</h2>
-<p class="sub"><span class="status assume">가정</span> 표시는 학교 학업성적관리규정으로 아직 확인하지 않은 규칙입니다. <code>rules.json</code>에서 바꿀 수 있습니다.</p>
+<p class="sub"><span class="status guide">교육청 지침</span> 교육청 시행지침에서 확인(학교 규정은 아직) · <span class="status assume">가정</span> 아직 확인하지 못함 · <span class="status ok">확인됨</span> 학교 규정까지 확인. <code>rules.json</code>에서 바꿀 수 있습니다. <span id="guideLink"></span></p>
 <div class="tablewrap"><table id="rulesTable"></table></div>
 <ul class="method">
   <li><b>문항 비교</b>: 우리 학생 정답률이 들어가는 구간을 전국 구간과 비교해 ‘높음 / 범위 안 / 낮음’으로 표시합니다. 구간 경계값(예: 80%)은 위쪽 구간(A)에 넣었습니다.</li>
@@ -322,8 +326,8 @@ function renderStudent(id){
       <div style="overflow-x:auto"><table class="official"><tr><th>학점</th><th>원점수/과목평균</th><th>성취도(수강자수)</th>
       <th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>석차등급</th><th>석차(검산용)</th></tr>
       <tr><td>${t.credits}</td><td>${r.total}/${t.mean.toFixed(1)}</td><td><b>${r.achievement}</b>(${t.n})</td>
-      ${'ABCDE'.split('').map(L => `<td>${t.dist[L].toFixed(1)}</td>`).join('')}<td><b>${r.grade}</b></td><td>${r.rank}</td></tr></table></div>
-      <p class="small">반올림 전 합계 ${(+r.raw).toFixed(2)}점</p>`;
+      ${'ABCDE'.split('').map(L => `<td>${t.dist[L].toFixed(1)}</td>`).join('')}<td><b>${r.grade}</b></td><td>${r.rank}${r.ties > 1 ? ' (동점 ' + r.ties + '명)' : ''}</td></tr></table></div>
+      <p class="small">환산 점수 합계 ${(+r.sum).toFixed(2)}점${r.below_min ? ' · <b class="low">40점 미만: 최소 성취수준 보장지도 대상</b>' : ''}</p>`;
     box.appendChild(d);
   });
 }
@@ -412,20 +416,24 @@ function renderSim(){
 
 // 07 규칙 표
 (function(){
-  const r = R.naesin.rules, tag = st => `<span class="status ${st === '확인됨' ? 'ok' : 'assume'}">${st}</span>`;
+  const r = R.naesin.rules, tag = st => `<span class="status ${st === '확인됨' ? 'ok' : st === '교육청 지침' ? 'guide' : 'assume'}">${st}</span>`;
+  if (r.guide) $('#guideLink').innerHTML = `기준 문서: <a href="${r.guide.url}">${r.guide.title}</a>`;
+  const c0 = r.grade_ratio.cumulative;
   const rows = [
-    ['석차등급 비율', r.grade_ratio.cumulative.map((c, i) => c - (i ? r.grade_ratio.cumulative[i-1] : 0)).join(' / ') + ' %', r.grade_ratio.status, r.grade_ratio.source || ''],
-    ['동점자 처리', r.tie_method.value, r.tie_method.status, r.tie_method.choices[r.tie_method.value]],
+    ['석차등급 비율', c0.map((c, i) => c - (i ? c0[i-1] : 0)).join(' / ') + ' %', r.grade_ratio.status, r.grade_ratio.source || ''],
     ['등급 경계 방식', r.cut_method.value, r.cut_method.status, r.cut_method.choices[r.cut_method.value]],
-    ['원점수 반올림', r.total_rounding.places === 0 ? '정수로 반올림' : '소수 ' + r.total_rounding.places + '자리', r.total_rounding.status, '0.5는 올림'],
+    ['동점자 처리', r.cut_method.value === '지침' ? '경계에 걸칠 때만 중간석차' : r.tie_method.value, r.cut_method.value === '지침' ? r.cut_method.status : r.tie_method.status, r.cut_method.source || ''],
+    ['합계·원점수 반올림', `합계 소수 ${r.total_rounding.sum_places}자리 → 원점수 ${r.total_rounding.places === 0 ? '정수' : '소수 ' + r.total_rounding.places + '자리'}`, r.total_rounding.status, r.total_rounding.source || ''],
+    ['석차를 매기는 점수', r.rank_basis.value, r.rank_basis.status, r.rank_basis.source || ''],
+    ['최소 성취수준', r.min_level.value + '점', r.min_level.status, r.min_level.source || ''],
   ];
   r.semesters.forEach(s => {
-    rows.push([`${s.semester}학기 반영 비율`, `중간 ${s.weights.midterm} / 기말 ${s.weights.final} / 수행 ${s.weights.performance}`, s.weights_status, '교과 담당 교사가 정함']);
+    rows.push([`${s.semester}학기 반영 비율`, `중간 ${s.weights.midterm} / 기말 ${s.weights.final} / 수행 ${s.weights.performance}`, s.weights_status, '교과협의회에서 정하고 학업성적관리위원회 심의 후 학교장이 결정 (수행평가 30% 이상)']);
     const c = s.achievement.cutoffs;
-    rows.push([`${s.semester}학기 성취도 기준`, `${s.achievement.mode} · A ${c.A} / B ${c.B} / C ${c.C} / D ${c.D}`, s.achievement.status, '고정분할 또는 변동분할']);
+    rows.push([`${s.semester}학기 성취도 기준`, `${s.achievement.mode} · A ${c.A} / B ${c.B} / C ${c.C} / D ${c.D}`, s.achievement.status, '지침의 고정 분할점수. 학교가 추정분할점수를 쓰면 그 점수로 바꿈']);
   });
   $('#rulesTable').innerHTML = '<tr><th class="l">항목</th><th class="l">지금 값</th><th class="l">상태</th><th class="l">설명</th></tr>' +
-    rows.map(x => `<tr><td class="l">${x[0]}</td><td class="l">${x[1]}</td><td class="l">${tag(x[2])}</td><td class="l small">${x[3]}</td></tr>`).join('');
+    rows.map(x => `<tr><td class="l">${x[0]}</td><td class="l">${x[1]}</td><td class="l">${tag(x[2])}</td><td class="l small" style="white-space:normal;min-width:240px">${x[3]}</td></tr>`).join('');
 })();
 // 04 문항 분석
 function renderItems(eid){
@@ -478,7 +486,9 @@ function renderItems(eid){
   sel.innerHTML = opts; sel2.innerHTML = opts;
   sel.addEventListener('change', () => { sel2.value = sel.value; renderStudent(sel.value); renderSim(); });
   sel2.addEventListener('change', () => { sel.value = sel2.value; renderStudent(sel2.value); renderSim(); });
-  renderStudent(R.students[0].student_id); renderSim();
+  const link = () => { $('#sheetLink').href = 'students/' + sel.value + '.html'; };
+  sel.addEventListener('change', link); sel2.addEventListener('change', link);
+  renderStudent(R.students[0].student_id); renderSim(); link();
   document.addEventListener('mousemove', e => { const t = e.target.closest('[data-tip]'); t ? showTip(e, t.dataset.tip) : hideTip(); });
 })();
 </script>
@@ -494,4 +504,5 @@ if __name__ == "__main__":
         generate_sample.main()
     path = build(src)
     print(f"보고서를 만들었습니다: {path}")
+    print(f"학생용 한 장도 만들었습니다: {path.parent / 'students'}")
     print("이 파일을 더블클릭하면 브라우저에서 열립니다.")

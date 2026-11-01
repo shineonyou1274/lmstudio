@@ -22,12 +22,19 @@ from naesin import D  # noqa: E402
 W = {"midterm": 30, "final": 30, "performance": 40}
 
 
-def rules_with(tie="중간석차", cut="백분율", places=0):
+RND = {"sum_places": 2, "places": 0}
+
+
+def rules_with(tie="중간석차", cut="지침", places=0):
     r = deepcopy(naesin.DEFAULT_RULES)
     r["tie_method"]["value"] = tie
     r["cut_method"]["value"] = cut
     r["total_rounding"]["places"] = places
     return r
+
+
+def total(mid, fin, perf, w=W, rnd=RND, perf_max=40):
+    return naesin.semester_values(mid, fin, perf, perf_max, w, rnd)["total"]
 
 
 class Basics(unittest.TestCase):
@@ -38,10 +45,20 @@ class Basics(unittest.TestCase):
 
     def test_semester_total(self):
         # 중간 80×0.3=24, 기말 90×0.3=27, 수행 36/40×40=36 → 87
-        raw, total = naesin.semester_total(80, 90, 36, 40, W, 0)
-        self.assertEqual((raw, total), (Decimal("87"), Decimal("87")))
+        v = naesin.semester_values(80, 90, 36, 40, W, RND)
+        self.assertEqual((v["raw"], v["sum"], v["total"]), (87, 87, 87))
         # 중간 77×0.3=23.1, 기말 81×0.3=24.3, 수행 33/40×40=33 → 80.4 → 80
-        self.assertEqual(naesin.semester_total(77, 81, 33, 40, W, 0)[1], 80)
+        self.assertEqual(total(77, 81, 33), 80)
+
+    def test_guide_rounding_order(self):
+        # 지침: 합계를 먼저 소수 둘째 자리로(셋째 자리에서 반올림), 그다음 정수로.
+        # 수행 33.98/40×40 = 33.98, 중간 85 → 25.5, 기말 100 → 30 : 89.48 → 89
+        self.assertEqual(total(85, 100, "33.98"), 89)
+        # 89.495 → 89.50 → 90 (한 번에 정수로 반올림하면 89)
+        w = {"midterm": 0, "final": 0, "performance": 100}
+        v = naesin.semester_values(0, 0, "89.495", 100, w, RND)
+        self.assertEqual((v["sum"], v["total"]), (Decimal("89.50"), 90))
+        self.assertEqual(naesin.round_half_up("89.495"), 89)
 
     def test_achievement_fixed_and_custom(self):
         fixed = {"A": 90, "B": 80, "C": 70, "D": 60}
@@ -53,26 +70,45 @@ class Basics(unittest.TestCase):
 
 
 class RankFixture(unittest.TestCase):
-    """10명. 누적 비율 10/34/66/90/100 → 경계 1, 3.4, 6.6, 9, 10명."""
+    """10명. 누적 비율 10/34/66/90/100 → 누적 인원(반올림) 1, 3, 7, 9, 10명."""
     totals = {"a": 100, "b": 95, "c": 95, "d": 90, "e": 85, "f": 80, "g": 80, "h": 80, "i": 70, "j": 60}
 
     def grades(self, **kw):
         r = naesin.rank_grades({k: D(v) for k, v in self.totals.items()}, rules_with(**kw))
-        return {k: (v["rank"], v["grade"]) for k, v in r.items()}
+        return {k: (v["rank"], v["ties"], v["grade"]) for k, v in r.items()}
 
-    def test_mid_rank_percent(self):
+    def test_guide_rule(self):
         g = self.grades()
-        self.assertEqual(g["a"], (1, 1))
-        self.assertEqual(g["b"], (Decimal("2.5"), 2))  # 2·3등 동점 → 2.5
-        self.assertEqual(g["d"], (4, 3))
-        self.assertEqual(g["f"], (7, 4))               # 6·7·8등 동점 → 7, 7 > 6.6 → 4등급
-        self.assertEqual(g["i"], (9, 4))
-        self.assertEqual(g["j"], (10, 5))
+        self.assertEqual(g["a"], (1, 1, 1))
+        self.assertEqual(g["b"], (2, 2, 2))  # 2·3등 동점: 둘 다 2등급 범위(≤3명) 안 → 그대로 2등급
+        self.assertEqual(g["d"], (4, 1, 3))
+        # 6·7·8등 동점: 6·7등은 3등급(≤7명), 8등은 4등급 → 경계에 걸침
+        # → 중간석차 7, 7/10 = 70% > 66% → 모두 4등급
+        self.assertEqual(g["f"], (6, 3, 4))
+        self.assertEqual(g["i"], (9, 1, 4))
+        self.assertEqual(g["j"], (10, 1, 5))
+
+    def test_guide_examples(self):
+        # 지침 예시 1: 수강자 96명, 1등 동점자 19명 → 중간석차 10, 10.42% → 19명 모두 2등급
+        tot = {f"t{i}": D(100) for i in range(19)} | {f"o{i}": D(90 - i % 50) for i in range(77)}
+        r = naesin.rank_grades(tot, rules_with())
+        self.assertEqual({r[f"t{i}"]["grade"] for i in range(19)}, {2})
+        # 지침 예시 2: 수강자 120명, 1등 1명·2등 동점자 15명 → 중간석차 9, 7.5% → 16명 모두 1등급
+        tot = {"top": D(100)} | {f"t{i}": D(99) for i in range(15)} | {f"o{i}": D(50 + i % 40) for i in range(104)}
+        r = naesin.rank_grades(tot, rules_with())
+        self.assertEqual(sum(1 for v in r.values() if v["grade"] == 1), 16)
 
     def test_rule_choice_changes_result(self):
         # 같은 점수라도 규칙에 따라 등급이 바뀐다 → 학교 규정 확인이 꼭 필요한 이유
-        self.assertEqual(self.grades(cut="인원반올림")["f"][1], 3)   # 경계 6.6 → 7명, 석차 7 ≤ 7
-        self.assertEqual(self.grades(tie="최고석차")["f"], (6, 3))    # 석차 6 ≤ 6.6
+        self.assertEqual(self.grades(cut="인원반올림")["f"][2], 3)               # 중간석차 7 ≤ 7명
+        self.assertEqual(self.grades(cut="백분율", tie="최고석차")["f"][2], 3)    # 6/10 = 60% ≤ 66%
+        self.assertEqual(self.grades(cut="백분율")["f"][2], 4)                   # 7/10 = 70%
+
+    def test_count_vs_percent_without_ties(self):
+        # 98명이면 1등급 누적 인원 = 9.8 → 10명. 10등은 지침으로 1등급, 단순 백분율(10.2%)로는 2등급
+        tot = {f"s{i}": D(200 - i) for i in range(98)}
+        self.assertEqual(naesin.rank_grades(tot, rules_with())["s9"]["grade"], 1)
+        self.assertEqual(naesin.rank_grades(tot, rules_with(cut="백분율"))["s9"]["grade"], 2)
 
     def test_transcript_hand(self):
         data = {
@@ -94,6 +130,7 @@ class RankFixture(unittest.TestCase):
         sem = {"semester": 1, "subject": "x", "credits": 4, "midterm": "M", "final": "F",
                "weights": W, "achievement": {"cutoffs": {"A": 90, "B": 80, "C": 70, "D": 60}}}
         t = naesin.transcript(data, rules_with(), sem)
+        self.assertFalse(t["rows"]["q"]["below_min"])
         # p: 24+27+36=87(B), q: 18+21+30=69(D), s: 100(A). r는 중간 결시로 제외
         self.assertEqual(t["n"], 3)
         self.assertEqual([t["rows"][k]["total"] for k in "pqs"], [87, 69, 100])
@@ -106,47 +143,48 @@ class RankFixture(unittest.TestCase):
 class NeededFinal(unittest.TestCase):
     def test_hand(self):
         # 중간 80, 수행 36/40: 합계 = 60 + 0.3×기말. 반올림해 90 이상 → 89.5 이상 → 기말 98.33… → 99
-        self.assertEqual(naesin.needed_final(80, 36, 40, W, 0, 90), 99)
-        self.assertIsNone(naesin.needed_final(50, 20, 40, W, 0, 90))     # 만점이어도 안 됨
-        self.assertEqual(naesin.needed_final(100, 40, 40, W, 0, 60), 0)  # 0점이어도 됨
+        self.assertEqual(naesin.needed_final(80, 36, 40, W, RND, 90), 99)
+        self.assertIsNone(naesin.needed_final(50, 20, 40, W, RND, 90))     # 만점이어도 안 됨
+        self.assertEqual(naesin.needed_final(100, 40, 40, W, RND, 60), 0)  # 0점이어도 됨
 
     def test_against_brute_force(self):
         rng = random.Random(7)
         for _ in range(400):
             mid, perf, target = rng.randint(0, 100), rng.randint(0, 40), rng.randint(40, 100)
-            places = rng.choice([0, 1])
+            rnd = rng.choice([RND, {"sum_places": 2, "places": 1}, {"sum_places": 1, "places": 0}])
+            key = rng.choice(["total", "sum"])
             w = rng.choice([W, {"midterm": 35, "final": 35, "performance": 30},
                             {"midterm": 25, "final": 40, "performance": 35}])
             brute = next((f for f in range(101)
-                          if naesin.semester_total(mid, f, perf, 40, w, places)[1] >= target), None)
-            got = naesin.needed_final(mid, perf, 40, w, places, target)
-            self.assertEqual(got, None if brute is None else brute, (mid, perf, target, places, w))
+                          if naesin.semester_values(mid, f, perf, 40, w, rnd)[key] >= target), None)
+            got = naesin.needed_final(mid, perf, 40, w, rnd, target, key=key)
+            self.assertEqual(got, None if brute is None else brute, (mid, perf, target, rnd, w, key))
 
 
 class ThresholdShortcut(unittest.TestCase):
-    """시뮬레이션의 빠른 경계 계산이, 내 점수를 하나씩 넣고 석차를 다 매겨 보는 방법과 같은지."""
+    """시뮬레이션의 빠른 경계 계산(이분 탐색)이, 내 점수를 0점부터 하나씩 넣고
+    석차를 다 매겨 보는 방법과 같은지. 동점이 많이 생기도록 좁은 점수 범위를 쓴다."""
 
     def test_against_full_ranking(self):
         rng = random.Random(11)
-        for trial in range(150):
-            tie, cut = rng.choice(["중간석차", "최고석차"]), rng.choice(["백분율", "인원반올림"])
+        for trial in range(200):
+            tie, cut = rng.choice(["중간석차", "최고석차"]), rng.choice(["지침", "지침", "백분율", "인원반올림"])
             rules = rules_with(tie=tie, cut=cut)
-            n_others = rng.randint(4, 25)
-            others = [rng.randint(40, 60) for _ in range(n_others)]  # 좁은 범위 → 동점이 많음
+            others = [rng.randint(40, 60) for _ in range(rng.randint(4, 40))]
             v_self = rng.randint(30, 70)
-            n = n_others + 1
             srt = sorted(others + [v_self])
-            w2 = naesin.tie_weight2(tie)
             for g in range(1, 5):
-                lim = simulate.max_rank2(g, n, rules["grade_ratio"]["cumulative"], cut) - 2
-                fast = simulate.min_units_for_grade(srt, v_self, lim, w2, 100)
+                fast = simulate.min_units_for_grade(srt, v_self, g, rules, 100)
 
                 def grade_if(T):
                     tot = {f"o{i}": D(x) for i, x in enumerate(others)}
                     tot["me"] = D(T)
                     return naesin.rank_grades(tot, rules)["me"]["grade"]
-                slow = next((T for T in range(101) if grade_if(T) <= g), 101)
-                self.assertEqual(fast, slow, (trial, tie, cut, g, others, v_self))
+                slow = [grade_if(T) <= g for T in range(101)]
+                expect = slow.index(True) if True in slow else 101
+                self.assertEqual(fast, expect, (trial, tie, cut, g, others, v_self))
+                # 이분 탐색의 전제: 한 번 목표 등급에 들면 점수가 더 올라도 계속 든다
+                self.assertTrue(all(slow[expect:]), (trial, tie, cut, g))
 
 
 class SampleSimulation(unittest.TestCase):
@@ -172,7 +210,8 @@ class SampleSimulation(unittest.TestCase):
         for sid, r in rows.items():
             first = totals.index(r["total"]) + 1
             last = len(totals) - totals[::-1].index(r["total"])
-            self.assertEqual(r["rank"], Decimal(first + last) / 2)  # 중간석차
+            self.assertEqual(r["rank"], first)
+            self.assertEqual(r["ties"], last - first + 1)
 
     def test_simulation_shape_and_order(self):
         sim = self.sim
@@ -206,16 +245,18 @@ class SampleSimulation(unittest.TestCase):
 
     def test_achievement_need_is_exact(self):
         s2 = self.rules["semesters"][1]
+        rnd = self.rules["total_rounding"]
         for st in self.sim["students"].values():
             for lv in st["perf_levels"]:
                 for L, f in st["achievement"][lv["key"]].items():
                     cut = s2["achievement"]["cutoffs"][L]
+                    t = lambda x: naesin.semester_values(st["mid"], x, lv["score"], 40, s2["weights"], rnd)["total"]
                     if f is None:
-                        self.assertLess(naesin.semester_total(st["mid"], 100, lv["score"], 40, s2["weights"], 0)[1], cut)
+                        self.assertLess(t(100), cut)
                         continue
-                    self.assertGreaterEqual(naesin.semester_total(st["mid"], f, lv["score"], 40, s2["weights"], 0)[1], cut)
+                    self.assertGreaterEqual(t(f), cut)
                     if f > 0:
-                        self.assertLess(naesin.semester_total(st["mid"], f - 1, lv["score"], 40, s2["weights"], 0)[1], cut)
+                        self.assertLess(t(f - 1), cut)
 
     def test_reproducible(self):
         again = simulate.simulate(self.data, self.rules, self.rules["semesters"][1], self.rules["semesters"][0])

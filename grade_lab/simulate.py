@@ -21,7 +21,7 @@ import random
 from decimal import Decimal
 
 import naesin
-from naesin import D, round_half_up, semester_total, needed_final
+from naesin import D, round_half_up, semester_values, needed_final
 
 
 def change_model(data: dict, sem_prev: dict) -> dict:
@@ -43,33 +43,26 @@ def change_model(data: dict, sem_prev: dict) -> dict:
     return {"a": a, "b": b, "sd": sd, "n": n, "mean_change": my - mx, "fallback": False}
 
 
-def min_units_for_grade(srt: list, v_self: int, limit: int, w2: int, top: int) -> int:
-    """srt: 모의 원점수(정수 단위) 전체를 정렬한 목록(나 자신의 값 v_self 포함).
-    나를 뺀 다른 학생들 사이에서 석차 기여(두 배 값)가 limit 이하가 되는 가장 낮은 원점수.
-    만점(top)이어도 안 되면 top+1."""
+def min_units_for_grade(srt: list, v_self: int, g: int, rules: dict, top: int) -> int:
+    """srt: 모의 점수(정수 단위) 전체를 정렬한 목록(나 자신의 값 v_self 포함).
+    나를 뺀 다른 학생들 사이에서 석차등급 g 이상이 되는 가장 낮은 점수(정수 단위).
+    만점(top)이어도 안 되면 top+1. 등급은 점수가 오를수록 나빠지지 않는다는 성질로 이분 탐색한다."""
     n = len(srt)
 
-    def f2_others(T):
+    def grade_at(T):
         lo, hi = bisect.bisect_left(srt, T), bisect.bisect_right(srt, T)
-        c_self = 2 if v_self > T else (w2 if v_self == T else 0)
-        return 2 * (n - hi) + w2 * (hi - lo) - c_self
+        higher = n - hi - (1 if v_self > T else 0)
+        same_others = hi - lo - (1 if v_self == T else 0)
+        return naesin.grade_from_position(higher + 1, same_others + 1, n, rules)
 
     lo, hi = 0, top + 1
-    while lo < hi:  # f2_others는 T가 커질수록 줄어든다(늘지 않는다)
+    while lo < hi:
         T = (lo + hi) // 2
-        if f2_others(T) <= limit:
+        if grade_at(T) <= g:
             hi = T
         else:
             lo = T + 1
     return lo
-
-
-def max_rank2(g: int, n: int, cumulative: list, cut_method: str) -> int:
-    """석차등급 g 안에 드는 가장 큰 석차(두 배 값). naesin.grade_of_rank2와 같은 기준."""
-    c = D(cumulative[g - 1])
-    if cut_method == "백분율":
-        return int((2 * n * c / 100).to_integral_value(rounding="ROUND_FLOOR"))
-    return int(2 * round_half_up(D(n) * c / 100))
 
 
 def _num_text(d) -> str:
@@ -90,11 +83,9 @@ def simulate(data: dict, rules: dict, sem: dict, sem_prev: dict | None) -> dict 
     if sem["midterm"] not in exam_ids:
         return None
     sim_cfg = rules["simulation"]
-    places = int(rules["total_rounding"]["places"])
-    scale = 10 ** places
-    cum = rules["grade_ratio"]["cumulative"]
-    cut = rules["cut_method"]["value"]
-    w2 = naesin.tie_weight2(rules["tie_method"]["value"])
+    rounding = rules["total_rounding"]
+    bk = naesin.basis_key(rules)          # 석차를 매기는 점수(원점수 또는 환산합계)
+    scale = 10 ** naesin.basis_places(rules)
     weights, perf_max = sem["weights"], D(sem["performance_max"])
     step = D(sim_cfg.get("score_step", 1))
 
@@ -121,9 +112,6 @@ def simulate(data: dict, rules: dict, sem: dict, sem_prev: dict | None) -> dict 
 
     model = change_model(data, sem_prev) if sem_prev else {"a": 0.0, "b": 1.0, "sd": 8.0, "n": 0,
                                                             "mean_change": 0.0, "fallback": True}
-
-    # 석차등급 g 이상이 되려면: rank2 <= R[g]  ⇔  다른 학생 기여(f2) <= R[g] - 2
-    limit = {g: max_rank2(g, n, cum, cut) - 2 for g in range(1, 5)}
 
     rng = random.Random(sim_cfg["seed"])
     runs = int(sim_cfg["runs"])
@@ -153,12 +141,12 @@ def simulate(data: dict, rules: dict, sem: dict, sem_prev: dict | None) -> dict 
             for i, sid in enumerate(pop):
                 f = model["a"] + model["b"] * float(mid[sid]) + scen["shift"] + noise[k][i]
                 f = min(D(100), max(D(0), round_half_up(D(f) / step) * step))
-                _, t = semester_total(mid[sid], f, others_perf[sid], perf_max, weights, places)
+                t = semester_values(mid[sid], f, others_perf[sid], perf_max, weights, rounding)[bk]
                 units.append(int(t * scale))
             srt = sorted(units)
             for i, sid in enumerate(pop):
                 for g in range(1, 5):
-                    thr[sid][g].append(min_units_for_grade(srt, units[i], limit[g], w2, top))
+                    thr[sid][g].append(min_units_for_grade(srt, units[i], g, rules, top))
 
         for sid in pop:
             memo = {}
@@ -168,7 +156,7 @@ def simulate(data: dict, rules: dict, sem: dict, sem_prev: dict | None) -> dict 
                     key = (lv["key"], T)
                     if key not in memo:
                         memo[key] = None if T > top else needed_final(
-                            mid[sid], lv["score"], perf_max, weights, places, D(T) / scale, step)
+                            mid[sid], lv["score"], perf_max, weights, rounding, D(T) / scale, step, key=bk)
                     return memo[key]
                 per_g, fs_by_g = {}, {}
                 for g in range(1, 5):
@@ -198,7 +186,7 @@ def simulate(data: dict, rules: dict, sem: dict, sem_prev: dict | None) -> dict 
     cutoffs = sem["achievement"]["cutoffs"]
     for sid in pop:
         results[sid]["achievement"] = {
-            lv["key"]: {L: needed_final(mid[sid], lv["score"], perf_max, weights, places, cutoffs[L], step)
+            lv["key"]: {L: needed_final(mid[sid], lv["score"], perf_max, weights, rounding, cutoffs[L], step)
                         for L in "ABCD"}
             for lv in levels_of[sid]}
         results[sid]["mid"] = mid[sid]
