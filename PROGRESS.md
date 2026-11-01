@@ -104,6 +104,9 @@
 - 시도 2: `--disable-gpu-sandbox` → **성공**. LM Studio 첫 설정 화면(Advanced settings)이 열림.
   → 원인은 GPU 처리의 샌드박스(격리 실행)와 이 PC 환경의 충돌로 좁혀짐. 앞으로 이 옵션을 붙여 실행한다(바로가기 만들 예정).
 - 첫 설정 권장값: Developer Mode 켬(로컬 서버 메뉴 사용), "Start local LLM service on login" 끔(메모리 16GB 절약, 필요할 때만 서버 실행).
+- LM Studio 메인 화면 정상 동작 확인. 로컬 서버 켜기 시험 성공: `http://127.0.0.1:1234` (이 PC 안에서만 접속되는 주소).
+  로그에 오류 없음(INFO만). "Just-in-time model loading active" = 앱이 요청하면 모델을 자동으로 불러오는 설정.
+  아직 받은 모델이 없으므로 서버는 우리 앱을 연결할 때까지 꺼 둔다.
 - 대안(Plan B): 화면 없이 LM Studio 명령줄 도구 `lms`로 모델 받기·서버 실행. 우리 앱은 로컬 서버만 있으면 된다.
 
 ### 사양 확인 명령 (읽기 전용)
