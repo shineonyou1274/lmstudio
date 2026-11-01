@@ -206,10 +206,11 @@ class SampleCrossCheck(unittest.TestCase):
 
     def test_planted_absences_and_missing(self):
         ex = {e["exam_id"]: e for e in self.result["exams"]}
-        self.assertEqual(ex["N1"]["n_absent"], 1)
-        self.assertEqual(ex["M06"]["n_absent"], 1)
+        for eid in ("N1M", "M06", "M09", "N2M"):
+            self.assertEqual(ex[eid]["n_absent"], 1, eid)
+        self.assertEqual(ex["N1F"]["n_absent"], 0)
         self.assertEqual(ex["M03"]["n_missing"], 1)
-        self.assertNotIn("raw", ex["M06"]["fields"])
+        self.assertNotIn("평가원", {e["kind"] for e in self.result["exams"]})  # 고1 자료에는 평가원이 없다
 
     def test_sample_items_consistent(self):
         for eid, ia in self.result["items"].items():

@@ -57,7 +57,15 @@ def load(data_dir: Path) -> dict:
         for r in responses:
             r["item_no"] = int(r["item_no"])
             r["correct"] = int(r["correct"])
-    return {"students": students, "exams": exams, "scores": scores, "items": items, "responses": responses}
+    performance = []
+    if (data_dir / "performance.csv").exists():
+        performance = _read(data_dir / "performance.csv")
+        for p in performance:
+            p["status"] = (p.get("status") or "").strip()
+            p["score"] = _num(p.get("score", ""))
+            p["max_score"] = _num(p.get("max_score", ""))
+    return {"students": students, "exams": exams, "scores": scores, "items": items, "responses": responses,
+            "performance": performance}
 
 
 # ---------- 기본 통계 (직접 구현; 테스트에서 statistics 모듈과 대조) ----------
