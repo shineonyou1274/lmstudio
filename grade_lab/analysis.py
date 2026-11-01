@@ -46,7 +46,18 @@ def load(data_dir: Path) -> dict:
             s[f] = _num(s.get(f, ""))
         s["status"] = (s.get("status") or "").strip()
     exams.sort(key=lambda e: e["date"])
-    return {"students": students, "exams": exams, "scores": scores}
+    items, responses = [], []
+    if (data_dir / "items.csv").exists() and (data_dir / "responses.csv").exists():
+        items = _read(data_dir / "items.csv")
+        for it in items:
+            it["item_no"] = int(it["item_no"])
+            it["points"] = int(it["points"])
+            it["band"] = it["band"].strip().upper()
+        responses = _read(data_dir / "responses.csv")
+        for r in responses:
+            r["item_no"] = int(r["item_no"])
+            r["correct"] = int(r["correct"])
+    return {"students": students, "exams": exams, "scores": scores, "items": items, "responses": responses}
 
 
 # ---------- 기본 통계 (직접 구현; 테스트에서 statistics 모듈과 대조) ----------
@@ -160,10 +171,101 @@ def describe_change(diff, lower_is_better: bool, field: str) -> str:
     return f"{abs(diff):g}{unit} {'상승' if better else '하락'}"
 
 
+# ---------- 전국연합 문항 분석 ----------
+
+# 전국 정답률 구간. A가 가장 쉬움. 하한 포함(예: 80%는 A)으로 가정.
+BAND_RANGE = {"A": (80, 100), "B": (60, 80), "C": (40, 60), "D": (20, 40), "E": (0, 20)}
+BAND_ORDER = "ABCDE"
+
+
+def band_of(rate: float) -> str:
+    for b in "ABCD":
+        if rate >= BAND_RANGE[b][0]:
+            return b
+    return "E"
+
+
+def compare_to_band(class_rate: float, national_band: str) -> str:
+    """우리 반 정답률이 전국 구간보다 '높음' / '범위 안' / '낮음'."""
+    diff = BAND_ORDER.index(national_band) - BAND_ORDER.index(band_of(class_rate))
+    return "높음" if diff > 0 else ("낮음" if diff < 0 else "범위 안")
+
+
+def item_analysis(exam_id: str, data: dict) -> dict | None:
+    items = sorted((i for i in data["items"] if i["exam_id"] == exam_id), key=lambda i: i["item_no"])
+    if not items:
+        return None
+    resp = [r for r in data["responses"] if r["exam_id"] == exam_id]
+    by_item: dict[int, list[int]] = {}
+    for r in resp:
+        by_item.setdefault(r["item_no"], []).append(r["correct"])
+
+    rows = []
+    for it in items:
+        marks = by_item.get(it["item_no"], [])
+        rate = 100 * sum(marks) / len(marks) if marks else None
+        rows.append({
+            "item_no": it["item_no"], "area": it["area"], "type": it["type"], "points": it["points"],
+            "band": it["band"], "band_range": BAND_RANGE[it["band"]],
+            "n": len(marks), "n_correct": sum(marks), "class_rate": rate,
+            "position": compare_to_band(rate, it["band"]) if rate is not None else "응답 없음",
+        })
+
+    # 유형별 정답률(문항을 묶어 맞힌 수 / 응답 수)
+    types: dict[str, list[int]] = {}
+    order: list[str] = []
+    for row in rows:
+        if row["type"] not in types:
+            types[row["type"]] = [0, 0]
+            order.append(row["type"])
+        types[row["type"]][0] += row["n_correct"]
+        types[row["type"]][1] += row["n"]
+    type_rows = [{"type": t, "n_items": sum(1 for r in rows if r["type"] == t),
+                  "rate": 100 * types[t][0] / types[t][1] if types[t][1] else None} for t in order]
+
+    # 자료 점검: 원점수 = 맞힌 문항 배점의 합 인가?
+    points = {it["item_no"]: it["points"] for it in items}
+    per_student: dict[str, list[dict]] = {}
+    for r in resp:
+        per_student.setdefault(r["student_id"], []).append(r)
+    raw_of = {s["student_id"]: s["raw"] for s in data["scores"] if s["exam_id"] == exam_id}
+    problems = []
+    for sid, rs in per_student.items():
+        total = sum(points[r["item_no"]] * r["correct"] for r in rs)
+        if len(rs) != len(items):
+            problems.append(f"{sid}: 응답 {len(rs)}개 (문항 {len(items)}개)")
+        if raw_of.get(sid) is not None and raw_of[sid] != total:
+            problems.append(f"{sid}: 원점수 {raw_of[sid]} ≠ 문항 합계 {total}")
+
+    return {"exam_id": exam_id, "items": rows, "types": type_rows,
+            "max_points": sum(points.values()), "check_problems": problems}
+
+
+def student_items(student_id: str, exam_id: str, data: dict) -> dict | None:
+    items = {i["item_no"]: i for i in data["items"] if i["exam_id"] == exam_id}
+    rs = [r for r in data["responses"] if r["exam_id"] == exam_id and r["student_id"] == student_id]
+    if not items or not rs:
+        return None
+    area = {}
+    for a in ("듣기", "읽기"):
+        nos = [n for n, i in items.items() if i["area"] == a]
+        got = sum(items[r["item_no"]]["points"] for r in rs if r["correct"] and r["item_no"] in nos)
+        area[a] = {"got": got, "max": sum(items[n]["points"] for n in nos)}
+    wrong = sorted((r["item_no"] for r in rs if not r["correct"]))
+    wrong_rows = [{"item_no": n, "type": items[n]["type"], "points": items[n]["points"], "band": items[n]["band"]}
+                  for n in wrong]
+    return {"exam_id": exam_id, "area": area, "wrong": wrong_rows,
+            "wrong_easy": sum(1 for w in wrong_rows if w["band"] in ("A", "B"))}
+
+
 def analyze(data: dict) -> dict:
+    item_exams = [e["exam_id"] for e in data["exams"] if any(i["exam_id"] == e["exam_id"] for i in data["items"])]
     return {
         "exams": [exam_summary(e, data["scores"]) for e in data["exams"]],
+        "items": {eid: item_analysis(eid, data) for eid in item_exams},
         "students": [
-            {**s, "series": student_series(s["student_id"], data)} for s in data["students"]
+            {**s, "series": student_series(s["student_id"], data),
+             "items": {eid: student_items(s["student_id"], eid, data) for eid in item_exams}}
+            for s in data["students"]
         ],
     }

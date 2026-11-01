@@ -80,7 +80,7 @@ td.l,th.l{text-align:left}
 tr:last-child td{border-bottom:0}
 .tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:99px;background:var(--tag);color:var(--tag-ink);font-weight:600}
 .na{color:var(--muted)}
-.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.grid{display:grid;gap:16px;align-items:start;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
 .chart-title{font-weight:700;margin:0 0 2px}
 .chart-sub{color:var(--muted);font-size:12px;margin:0 0 8px}
 svg{display:block;width:100%;height:auto;overflow:visible}
@@ -94,6 +94,15 @@ select{font:inherit;padding:8px 12px;border-radius:10px;border:1px solid var(--l
 .tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--bg);font-size:12px;padding:6px 10px;
   border-radius:8px;opacity:0;transition:opacity .1s;z-index:9;white-space:nowrap}
 .method li{margin:6px 0;color:var(--ink-2)}
+.band{display:inline-block;min-width:22px;text-align:center;font-size:11px;font-weight:700;padding:1px 6px;border-radius:6px;
+  border:1px solid var(--line);color:var(--ink-2)}
+.low{color:var(--accent);font-weight:700}
+.bar{display:inline-block;height:8px;border-radius:4px;background:var(--s1);vertical-align:middle;margin-right:8px}
+.wrongs{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.wrongs span{font-size:12px;border:1px solid var(--line);border-radius:8px;padding:2px 8px;color:var(--ink-2)}
+.wrongs span.easy{border-color:var(--accent);color:var(--accent);font-weight:600}
+.kv{display:flex;gap:24px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
+.kv b{font-size:22px;color:var(--ink)}
 footer{margin-top:48px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:12px}
 </style>
 </head>
@@ -119,8 +128,20 @@ footer{margin-top:48px;color:var(--muted);font-size:12px;border-top:1px solid va
 <div class="picker"><label for="who"><b>학생 선택</b></label><select id="who"></select></div>
 <div class="grid" id="student"></div>
 
-<h2><span class="no">04</span>계산 방법과 한계</h2>
+<h2><span class="no">04</span>전국연합 문항 분석</h2>
+<p class="sub">문항마다 전국 정답률 구간(A 80~100% … E 0~20%)과 우리 반 정답률을 나란히 봅니다. 결시자는 분모에서 뺍니다.</p>
+<div class="picker"><label for="itemExam"><b>시험 선택</b></label><select id="itemExam"></select></div>
+<div class="card" id="itemChart"></div>
+<div class="grid" style="margin-top:16px">
+  <div class="card"><p class="chart-title">유형별 우리 반 정답률</p><p class="chart-sub">유형에 속한 문항을 묶어 계산 (맞힌 수 ÷ 응답 수)</p><table id="typeTable"></table></div>
+  <div class="card"><p class="chart-title">자료 점검</p><p class="chart-sub">원점수가 맞힌 문항 배점의 합과 같은지 확인합니다</p><div id="checkBox"></div></div>
+</div>
+<details style="margin-top:16px"><summary class="chart-sub" style="cursor:pointer">45문항 전체 표로 보기</summary>
+<div class="tablewrap" style="margin-top:8px"><table id="itemTable"></table></div></details>
+
+<h2><span class="no">05</span>계산 방법과 한계</h2>
 <ul class="method">
+  <li><b>문항 비교</b>: 우리 반 정답률이 들어가는 구간을 전국 구간과 비교해 ‘높음 / 범위 안 / 낮음’으로 표시합니다. 구간 경계값(예: 80%)은 위쪽 구간(A)에 넣었습니다. 한 반은 인원이 적어 몇 명 차이로도 구간이 바뀝니다.</li>
   <li><b>평균·중앙값·표준편차</b>: 결시자와 해당 칸이 빈 학생은 빼고 계산합니다. 표준편차는 모집단 표준편차(인원수 n으로 나눔)입니다.</li>
   <li><b>등급</b>은 순서를 나타내는 값이라 평균 대신 <b>분포와 중앙값</b>으로 보여 줍니다.</li>
   <li><b>변화</b>: 바로 앞 시험과 비교합니다. 둘 중 하나라도 값이 없으면 ‘비교 불가’와 그 이유를 적습니다. 등급은 숫자가 작아지면 ‘상승’입니다.</li>
@@ -229,7 +250,61 @@ function renderStudent(id){
       <details><summary class="chart-sub" style="cursor:pointer;margin-top:8px">표로 보기</summary><table>${rows}</table></details>`;
     box.appendChild(d);
   });
+  Object.entries(st.items || {}).forEach(([eid, it]) => {
+    const ex = R.exams.find(x => x.exam_id === eid);
+    const d = document.createElement('div'); d.className = 'card';
+    if (!it) { d.innerHTML = `<p class="chart-title">${ex.label} 문항</p><p class="chart-sub">응시 자료 없음(결시)</p>`; box.appendChild(d); return; }
+    const w = it.wrong.map(x => `<span class="${'AB'.includes(x.band) ? 'easy' : ''}" title="${x.type} · ${x.points}점 · 전국 ${x.band}">${x.item_no}번 ${x.band}</span>`).join('');
+    d.innerHTML = `<p class="chart-title">${ex.label} 문항</p><p class="chart-sub">영역별 득점과 틀린 문항(옆 글자는 전국 정답률 구간)</p>
+      <div class="kv"><div>듣기<br><b>${it.area['듣기'].got}</b> / ${it.area['듣기'].max}</div><div>읽기<br><b>${it.area['읽기'].got}</b> / ${it.area['읽기'].max}</div></div>
+      <p class="chart-sub" style="margin-top:10px">틀린 문항 ${it.wrong.length}개 · 그중 전국 정답률이 높은 A·B 문항 <b class="low">${it.wrong_easy}개</b> (테두리 강조)</p>
+      <div class="wrongs">${w || '<span>없음</span>'}</div>`;
+    box.appendChild(d);
+  });
 }
+// 04 문항 분석
+function renderItems(eid){
+  const ia = R.items[eid];
+  const W = 900, H = 246, L = 34, Rr = 8, T = 28, B = 26, n = ia.items.length, cw = (W - L - Rr) / n;
+  const Y = v => T + (H - T - B) * (100 - v) / 100;
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="문항별 정답률">`;
+  [0, 20, 40, 60, 80, 100].forEach(v => { s += `<line x1="${L}" x2="${W-Rr}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--grid)"/><text x="${L-6}" y="${Y(v)+4}" text-anchor="end">${v}</text>`; });
+  const lx = L + 17 * cw; s += `<line x1="${lx}" x2="${lx}" y1="${T}" y2="${H-B}" stroke="var(--line)" stroke-dasharray="3 3"/>`;
+  s += `<text x="${L + 8.5*cw}" y="14" text-anchor="middle" style="font-weight:700">듣기 1~17</text><text x="${lx + (n-17)*cw/2}" y="14" text-anchor="middle" style="font-weight:700">읽기 18~45</text>`;
+  ia.items.forEach((it, i) => {
+    const x = L + i * cw, [lo, hi] = it.band_range;
+    s += `<rect x="${x+2}" y="${Y(hi)}" width="${cw-4}" height="${Y(lo)-Y(hi)}" rx="3" fill="var(--s1)" opacity=".14"/>`;
+    if (it.class_rate != null) {
+      const low = it.position === '낮음';
+      s += `<circle cx="${x+cw/2}" cy="${Y(it.class_rate)}" r="${low ? 5 : 4}" fill="${low ? 'var(--accent)' : 'var(--s1)'}" stroke="var(--surface)" stroke-width="2"/>`;
+    }
+    s += `<rect x="${x}" y="${T}" width="${cw}" height="${H-B-T}" fill="transparent" data-tip="${it.item_no}번 ${it.type} · ${it.points}점 · 전국 ${it.band}(${lo}~${hi}%) · 우리 반 ${it.class_rate == null ? '—' : it.class_rate.toFixed(0) + '%'} · ${it.position}"/>`;
+    if (it.item_no === 1 || it.item_no % 5 === 0) s += `<text x="${x+cw/2}" y="${H-8}" text-anchor="middle">${it.item_no}</text>`;
+  });
+  s += '</svg>';
+  const lows = ia.items.filter(i => i.position === '낮음');
+  $('#itemChart').innerHTML = `<p class="chart-title">문항별 우리 반 정답률</p>
+    <p class="chart-sub">옅은 막대 = 전국 정답률 구간 · 점 = 우리 반 정답률 · 가로축 문항 번호 · 마우스를 올리면 자세히</p>
+    <div style="overflow-x:auto"><div style="min-width:560px">${s}</div></div>
+    <div class="legend"><span><i style="border-color:var(--s1);border-top-width:8px;opacity:.3"></i>전국 구간</span><span>● 우리 반</span><span class="low">● 전국 구간보다 낮음</span></div>
+    <p class="chart-sub" style="margin-top:10px">전국 구간보다 낮은 문항 <b class="low">${lows.length}개</b>: ${lows.map(i => i.item_no + '번(' + i.type + ')').join(', ') || '없음'}</p>`;
+  $('#typeTable').innerHTML = '<tr><th class="l">유형</th><th>문항</th><th class="l">정답률</th></tr>' + ia.types.map(t =>
+    `<tr><td class="l">${t.type}</td><td>${t.n_items}</td><td class="l"><span class="bar" style="width:${(t.rate||0)*0.8}px"></span>${t.rate == null ? '—' : t.rate.toFixed(0) + '%'}</td></tr>`).join('');
+  $('#checkBox').innerHTML = ia.check_problems.length
+    ? `<p class="low">확인 필요 ${ia.check_problems.length}건</p><ul class="changes">${ia.check_problems.map(p => `<li>${p}</li>`).join('')}</ul>`
+    : `<p>✓ 응시자 전원의 원점수가 맞힌 문항 배점의 합과 일치합니다. (만점 ${ia.max_points}점)</p>`;
+  $('#itemTable').innerHTML = '<tr><th>번호</th><th class="l">영역</th><th class="l">유형</th><th>배점</th><th>전국 구간</th><th>우리 반 정답률</th><th class="l">비교</th></tr>' +
+    ia.items.map(i => `<tr><td>${i.item_no}</td><td class="l">${i.area}</td><td class="l">${i.type}</td><td>${i.points}</td>
+      <td><span class="band">${i.band}</span> ${i.band_range[0]}~${i.band_range[1]}%</td><td>${i.class_rate == null ? '—' : i.class_rate.toFixed(1) + '%'} (${i.n_correct}/${i.n})</td>
+      <td class="l ${i.position === '낮음' ? 'low' : ''}">${i.position}</td></tr>`).join('');
+}
+(function(){
+  const ids = Object.keys(R.items || {}), sel = $('#itemExam');
+  if (!ids.length) { $('#itemChart').innerHTML = '<p class="chart-sub">문항 자료(items.csv, responses.csv)가 없습니다.</p>'; return; }
+  sel.innerHTML = ids.map(id => `<option value="${id}">${R.exams.find(e => e.exam_id === id).label}</option>`).join('');
+  sel.addEventListener('change', () => renderItems(sel.value));
+  renderItems(ids[0]);
+})();
 (function(){
   const sel = $('#who');
   sel.innerHTML = R.students.map(s => `<option value="${s.student_id}">${s.number}번 ${s.name}</option>`).join('');
