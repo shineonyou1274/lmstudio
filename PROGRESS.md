@@ -88,6 +88,18 @@
 - 아직 모델은 받지 않았다. 다음: 모델 검색 화면 캡처 → 작은 모델 선택 → 첫 대화·속도 측정.
 - Bionic(별도 앱)이 설치·실행된 흔적이 있다. 사용하지 않고, 삭제 여부는 나중에 정한다.
 
+## 2026-11-01 · LM Studio 실행 실패 원인
+
+- 설치 위치: `C:\Users\경남교육청\AppData\Local\Programs\LM Studio\LM Studio.exe`
+- PowerShell에서 직접 실행한 로그의 핵심:
+  - `GPU process exited unexpectedly: exit_code=-2147483645` 반복
+  - 마지막 줄: `FATAL ... GPU process isn't usable. Goodbye.` → 앱이 스스로 종료
+- 해석: LM Studio 창을 그리는 화면용 GPU 처리(Electron/Chromium)가 계속 죽어서 앱이 꺼진다.
+  모델 계산과는 별개다. 설정 폴더(`~\.lmstudio`)는 정상 생성되었고 한글 경로 관련 오류는 로그에 없다.
+- 그럴듯한 원인(미확정): 2023년 무렵의 오래된 Intel 그래픽 드라이버(31.0.101.4032), 가상 디스플레이 장치 "Sharing Monitor", 보안 프로그램의 간섭.
+- 무시해도 되는 로그: `FindExistingServer ... fetch failed`(이미 켜진 서버가 있는지 찾는 과정), `NODE_OPTIONs`, `SQLite experimental` 경고.
+- 다음 시도: `--disable-gpu` 옵션으로 실행(화면을 GPU 없이 그리게 함).
+
 ### 사양 확인 명령 (읽기 전용)
 
 윈도우 PowerShell:
