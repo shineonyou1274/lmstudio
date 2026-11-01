@@ -110,6 +110,9 @@
 - 모델 검색 화면(Staff picks) 확인. 기본 선택된 Qwen3.8 27B(Q4_K_M 17.74GB)는 "Likely too large" 표시 → 이 PC에 부적합.
 - 첫 모델 후보(이 PC 16GB·CPU 중심 기준): ① Gemma 4 E4B ② Qwen3 4B 2507(생각 단계 없는 버전, 빠른 응답) / 예비: Gemma 4 E2B.
   고르는 기준: 오른쪽 패널에 빨간 "Likely too large"가 없고, 파일 크기 약 6GB 이하. 실제 속도는 받은 뒤 측정.
+- **첫 모델 다운로드 완료**: `google/gemma-4-e4b` (Gemma 4 E4B Instruct, GGUF Q4_K_M, 6.33GB, 실제 7.9B, "Full GPU Offload Possible" 표시).
+  주의: 같은 검색 결과의 Uncensored/OBLITERATED 변형(안전장치 제거판)은 학교용으로 쓰지 않는다.
+- 다음: 첫 대화 시험(한국어 설명, 영어 쓰기 힌트) 및 속도 기록(tok/sec, 첫 글자까지 걸린 시간).
 - 대안(Plan B): 화면 없이 LM Studio 명령줄 도구 `lms`로 모델 받기·서버 실행. 우리 앱은 로컬 서버만 있으면 된다.
 
 ### 사양 확인 명령 (읽기 전용)
